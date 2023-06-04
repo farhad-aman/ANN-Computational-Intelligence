@@ -114,7 +114,7 @@ class Tanh(Activation):
         return dZ
     
 class LinearActivation(Activation):
-    def linear(Z: np.ndarray) -> np.ndarray:
+    def forward(Z: np.ndarray) -> np.ndarray:
         """
         Linear activation function.
             args:
