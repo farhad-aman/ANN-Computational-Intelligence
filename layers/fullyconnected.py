@@ -15,9 +15,9 @@ class FC:
         if self.initialize_method == "random":
             return np.random.randn(self.output_size, self.input_size)
         elif self.initialize_method == "xavier":
-            return None
+            return np.random.randn(self.output_size, self.input_size) * np.sqrt(1 / self.input_size)
         elif self.initialize_method == "he":
-            return None
+            return np.random.randn(self.output_size, self.input_size) * np.sqrt(2 / self.input_size)
         else:
             raise ValueError("Invalid initialization method")
 
