@@ -1,17 +1,13 @@
-import pickle
-import numpy as np
-from tqdm import tqdm
-
-# layers
-from layers.maxpooling2d import MaxPool2D
 from layers.convolution2d import Conv2D
+from layers.maxpooling2d import MaxPool2D
 from layers.fullyconnected import FC
 
-# activations
-from activations import ReLU
-from activations import Sigmoid
-from activations import LinearActivation
-from activations import Tanh
+from activations import Activation, get_activation, Sigmoid, ReLU, LinearActivation, Tanh
+import pickle
+from tqdm import tqdm
+import numpy as np
+import matplotlib.pyplot as plt
+from random import shuffle
 
 
 class Model:
@@ -20,7 +16,7 @@ class Model:
         Initialize the model.
         args:
             arch: dictionary containing the architecture of the model
-            criterion: loss 
+            criterion: loss
             optimizer: optimizer
             name: name of the model
         """
@@ -40,7 +36,10 @@ class Model:
         returns:
             True if the layer is a layer, False otherwise
         """
-        return type(layer) == MaxPool2D or type(layer) == Conv2D or type(layer) == FC
+        if type(layer) == MaxPool2D or type(layer) == FC or type(layer) == Conv2D:
+            return True
+        else:
+            return False
 
     def is_activation(self, layer):
         """
@@ -50,7 +49,10 @@ class Model:
         returns:
             True if the layer is an activation function, False otherwise
         """
-        return type(layer) == Sigmoid or type(layer) == LinearActivation or type(layer) == ReLU or type(layer) == Tanh
+        if type(layer) == Sigmoid or type(layer) == LinearActivation or type(layer) == ReLU or type(layer) == Tanh:
+            return True
+        else:
+            return False
 
     def forward(self, x):
         """
@@ -62,11 +64,11 @@ class Model:
         """
         tmp = []
         A = x
-        for i in range(0, len(self.layers_names), 2):
-            Z = self.model[self.layers_names[i]].forward(A)
-            tmp.append(np.copy(Z))
-            A = self.model[self.layers_names[i + 1]].forward(Z)
-            tmp.append(np.copy(A))
+        for l in range(0, len(self.layers_names), 2):
+            Z = self.model[self.layers_names[l]].forward(A)
+            tmp.append(np.copy(Z))  # hint add a copy of Z to tmp
+            A = self.model[self.layers_names[l + 1]].forward(Z)
+            tmp.append(np.copy(A))  # hint add a copy of A to tmp
         return tmp
 
     def backward(self, dAL, tmp, x):
@@ -81,14 +83,14 @@ class Model:
         """
         dA = dAL
         grads = {}
-        for i in range(len(tmp) - 1, -1, -2):
-            if i > 2:
-                Z, A = tmp[i - 1], tmp[i - 2]
+        for l in range(len(self.layers_names) - 1, -1, -2):
+            if l > 2:
+                Z, A = tmp[l - 1], tmp[l - 2]
             else:
-                Z, A = tmp[i - 1], x
-            dZ = self.model[self.layers_names[i]].backward(dA, Z)
-            dA, grad = self.model[self.layers_names[i - 1]].backward(dZ, A)
-            grads[self.layers_names[i - 1]] = grad
+                Z, A = tmp[l - 1], x
+            dZ = self.model[self.layers_names[l]].backward(dA, Z)
+            dA, grad = self.model[self.layers_names[l - 1]].backward(dZ, A)
+            grads[self.layers_names[l - 1]] = grad
         return grads
 
     def update(self, grads):
@@ -98,7 +100,8 @@ class Model:
             grads: gradients of the model
         """
         for name in self.layers_names:
-            if self.is_layer(self.model[name]) and not type(self.model[name]) == MaxPool2D:
+            if self.is_layer(self.model[name]) and (type(self.model[
+                                                             name]) != MaxPool2D):
                 self.model[name].update_parameters(self.optimizer, grads[name])
 
     def one_epoch(self, x, y):
@@ -142,7 +145,7 @@ class Model:
     def shuffle(self, m, shuffling):
         order = list(range(m))
         if shuffling:
-            return np.random.shuffle(order)
+            np.random.shuffle(order)
         return order
 
     def batch(self, X, y, batch_size, index, order):
@@ -158,16 +161,23 @@ class Model:
         returns:
             bx, by: batch of data
         """
-        last_index = index * batch_size
-        batch = order[last_index: last_index + batch_size]
-        if X.ndim == 2:
-            bx = X[:, np.asarray(batch)]
-            by = y[:, np.asarray(batch)]
+        start_index = index * batch_size
+        last_index = (index + 1) * batch_size
+        batch = order[start_index: last_index]
+        batch_np = np.asarray(batch)
+        if len(X.shape) == 2:
+            bx = X[:, batch_np]
+            by = y[:, batch_np]
             return bx, by
         else:
-            bx = X[np.asarray(batch), :, :, :]
-            by = y[np.asarray(batch)]
-            return bx, by
+            bx = []
+            by = []
+            for i in batch_np:
+                bx.append(X[i, :, :, :])
+                by.append(y[0][i])
+            temp_x = np.array(bx)
+            temp_y = np.array(by).reshape(1, -1)
+            return temp_x, temp_y
 
     def compute_loss(self, X, y, batch_size):
         """
@@ -179,7 +189,10 @@ class Model:
         returns:
             loss
         """
-        m = X.shape[0] if X.ndim == 4 else X.shape[1]
+        if len(X.shape) == 4:
+            m = X.shape[0]
+        else:
+            m = X.shape[1]
         order = self.shuffle(m, False)
         cost = 0
         for b in range(m // batch_size):
@@ -204,7 +217,10 @@ class Model:
         """
         train_cost = []
         val_cost = []
-        m = X.shape[0] if X.ndim == 4 else X.shape[1]
+        if len(X.shape) == 4:
+            m = X.shape[0]
+        else:
+            m = X.shape[1]
         for e in tqdm(range(1, epochs + 1)):
             order = self.shuffle(m, shuffling)
             cost = 0
@@ -214,7 +230,7 @@ class Model:
             train_cost.append(cost)
             if val is not None:
                 val_cost.append(self.compute_loss(X, y, batch_size))
-            if verbose:
+            if verbose != False:
                 if e % verbose == 0:
                     print("Epoch {}: train cost = {}".format(e, cost))
                 if val is not None:
@@ -231,6 +247,5 @@ class Model:
         returns:
             predictions
         """
-        A0 = X
-        AL = self.forward(A0)[-1]
-        return AL
+        tmp = self.forward(X)
+        return tmp[-1]
