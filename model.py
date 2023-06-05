@@ -1,14 +1,18 @@
-from layers.convolution2d import Conv2D
+import pickle
+import numpy as np
+from tqdm import tqdm
+
+# layers
 from layers.maxpooling2d import MaxPool2D
+from layers.convolution2d import Conv2D
 from layers.fullyconnected import FC
 
-from activations import Activation, get_activation
+# activations
+from activations import ReLU
+from activations import Sigmoid
+from activations import LinearActivation
+from activations import Tanh
 
-import pickle
-import tqdm
-import numpy as np
-import matplotlib.pyplot as plt
-from random import shuffle
 
 class Model:
     def __init__(self, arch, criterion, optimizer, name=None):
@@ -27,7 +31,7 @@ class Model:
             self.layers_names = list(arch.keys())
         else:
             self.model, self.criterion, self.optimizer, self.layers_names = self.load_model(name)
-    
+
     def is_layer(self, layer):
         """
         Check if the layer is a layer.
@@ -36,8 +40,7 @@ class Model:
         returns:
             True if the layer is a layer, False otherwise
         """
-        # TODO: Implement check if the layer is a layer
-        return None
+        return type(layer) == MaxPool2D or type(layer) == Conv2D or type(layer) == FC
 
     def is_activation(self, layer):
         """
@@ -47,9 +50,8 @@ class Model:
         returns:
             True if the layer is an activation function, False otherwise
         """
-        # TODO: Implement check if the layer is an activation
-        return None
-    
+        return type(layer) == Sigmoid or type(layer) == LinearActivation or type(layer) == ReLU or type(layer) == Tanh
+
     def forward(self, x):
         """
         Forward pass through the model.
@@ -60,15 +62,13 @@ class Model:
         """
         tmp = []
         A = x
-        # TODO: Implement forward pass through the model
-        # NOTICE: we have a pattern of layers and activations
-        for l in range(None):
-            Z = None
-            tmp.append(None)    # hint add a copy of Z to tmp
-            A = None
-            tmp.append(None)    # hint add a copy of A to tmp
+        for i in range(0, len(self.layers_names), 2):
+            Z = self.model[self.layers_names[i]].forward(A)
+            tmp.append(np.copy(Z))
+            A = self.model[self.layers_names[i + 1]].forward(Z)
+            tmp.append(np.copy(A))
         return tmp
-    
+
     def backward(self, dAL, tmp, x):
         """
         Backward pass through the model.
@@ -81,17 +81,14 @@ class Model:
         """
         dA = dAL
         grads = {}
-        # TODO: Implement backward pass through the model
-        # NOTICE: we have a pattern of layers and activations
-        # for from the end to the beginning of the tmp list
-        for l in range(None):
-            if l > 2:
-                Z, A = tmp[l - 1], tmp[l - 2]
+        for i in range(len(tmp) - 1, -1, -2):
+            if i > 2:
+                Z, A = tmp[i - 1], tmp[i - 2]
             else:
-                Z, A = tmp[l - 1], x
-            dZ = None
-            dA, grad = None
-            grads[self.layers_names[l - 1]] = None
+                Z, A = tmp[i - 1], x
+            dZ = self.model[self.layers_names[i]].backward(dA, Z)
+            dA, grad = self.model[self.layers_names[i - 1]].backward(dZ, A)
+            grads[self.layers_names[i - 1]] = grad
         return grads
 
     def update(self, grads):
@@ -100,10 +97,10 @@ class Model:
         args:
             grads: gradients of the model
         """
-        # for None:
-        #     if None:    # hint check if the layer is a layer and also is not a maxpooling layer
-        #         self.model[None].update(None)
-    
+        for name in self.layers_names:
+            if self.is_layer(self.model[name]) and not type(self.model[name]) == MaxPool2D:
+                self.model[name].update_parameters(self.optimizer, grads[name])
+
     def one_epoch(self, x, y):
         """
         One epoch of training.
@@ -114,15 +111,14 @@ class Model:
         returns:
             loss
         """
-        # TODO: Implement one epoch of training
-        tmp = None
-        AL = tmp[None]
-        loss = None
-        dAL = None
-        grads = None
-        self.update(None)
+        tmp = self.forward(x)
+        AL = tmp[-1]
+        loss = self.criterion.compute(AL, y)
+        dAL = self.criterion.backward(AL, y)
+        grads = self.backward(dAL, tmp, x)
+        self.update(grads)
         return loss
-    
+
     def save(self, name):
         """
         Save the model.
@@ -131,7 +127,7 @@ class Model:
         """
         with open(name, 'wb') as f:
             pickle.dump((self.model, self.criterion, self.optimizer, self.layers_names), f)
-        
+
     def load_model(self, name):
         """
         Load the model.
@@ -142,7 +138,7 @@ class Model:
         """
         with open(name, 'rb') as f:
             return pickle.load(f)
-        
+
     def shuffle(self, m, shuffling):
         order = list(range(m))
         if shuffling:
@@ -162,18 +158,16 @@ class Model:
         returns:
             bx, by: batch of data
         """
-        # TODO: Implement batch
-        last_index = None   # hint last index of the batch check for the last batch
-        batch = order[None: None]
-        # NOTICE: inputs are 4 dimensional or 2 demensional
-        if None:
-            bx = None
-            by = None
-            return None, None
+        last_index = index * batch_size
+        batch = order[last_index: last_index + batch_size]
+        if X.ndim == 2:
+            bx = X[:, np.asarray(batch)]
+            by = y[:, np.asarray(batch)]
+            return bx, by
         else:
-            bx = None
-            by = None
-            return None, None
+            bx = X[np.asarray(batch), :, :, :]
+            by = y[np.asarray(batch)]
+            return bx, by
 
     def compute_loss(self, X, y, batch_size):
         """
@@ -185,15 +179,14 @@ class Model:
         returns:
             loss
         """
-        # TODO: Implement compute loss
-        m = None
-        order = None
+        m = X.shape[0] if X.ndim == 4 else X.shape[1]
+        order = self.shuffle(m, False)
         cost = 0
         for b in range(m // batch_size):
-            bx, by = None
-            tmp = None
-            AL = None
-            cost += None
+            bx, by = self.batch(X, y, batch_size, b, order)
+            tmp = self.forward(bx)
+            AL = tmp[-1]
+            cost += self.criterion.compute_cost(AL, y)(m // batch_size)
         return cost
 
     def train(self, X, y, epochs, val=None, batch_size=3, shuffling=False, verbose=1, save_after=None):
@@ -209,21 +202,19 @@ class Model:
             verbose: if 1 print the loss after each epoch
             save_after: save the model after training
         """
-        # TODO: Implement training
         train_cost = []
         val_cost = []
-        # NOTICE: if your inputs are 4 dimensional m = X.shape[0] else m = X.shape[1]
-        m = None
-        for e in tqdm(1, epochs + 1):
-            order = self.shuffle(None, None)
+        m = X.shape[0] if X.ndim == 4 else X.shape[1]
+        for e in tqdm(range(1, epochs + 1)):
+            order = self.shuffle(m, shuffling)
             cost = 0
-            for b in range(None):
-                bx, by = None
-                cost += None
-            train_cost.append(None)
+            for b in range(m // batch_size):
+                bx, by = self.batch(X, y, batch_size, b, order)
+                cost += self.one_epoch(bx, by) / (m // batch_size)
+            train_cost.append(cost)
             if val is not None:
-                val_cost.append(None)
-            if verbose != False:
+                val_cost.append(self.compute_loss(X, y, batch_size))
+            if verbose:
                 if e % verbose == 0:
                     print("Epoch {}: train cost = {}".format(e, cost))
                 if val is not None:
@@ -231,7 +222,7 @@ class Model:
         if save_after is not None:
             self.save(save_after)
         return train_cost, val_cost
-    
+
     def predict(self, X):
         """
         Predict the output of the model.
@@ -240,5 +231,6 @@ class Model:
         returns:
             predictions
         """
-        # TODO: Implement prediction
-        return None
+        A0 = X
+        AL = self.forward(A0)[-1]
+        return AL
