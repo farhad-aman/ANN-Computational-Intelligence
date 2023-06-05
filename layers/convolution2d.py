@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 
 
@@ -19,15 +21,18 @@ class Conv2D:
         returns:
             weights: initialized kernel with shape: (kernel_size[0], kernel_size[1], in_channels, out_channels)
         """
-        weights = np.random.randn(self.kernel_size[0], self.kernel_size[1], self.in_channels, self.out_channels)
         if self.initialize_method == "random":
-            return weights
+            return np.random.randn(self.kernel_size[0], self.kernel_size[1], self.in_channels, self.out_channels) * 0.01
         if self.initialize_method == "xavier":
-            weights = weights * np.sqrt(1 / self.input_size)
-            return weights
+            fan_in = self.kernel_size[0] * self.kernel_size[1] * self.in_channels
+            fan_out = self.kernel_size[0] * self.kernel_size[1] * self.out_channels
+            limit = math.sqrt(6 / fan_in + fan_out)
+            return np.random.uniform(-limit, limit, size=(
+                self.kernel_size[0], self.kernel_size[1], self.in_channels, self.out_channels))
         if self.initialize_method == "he":
-            weights = weights * np.sqrt(2 / self.input_size)
-            return weights
+            fan_in = self.kernel_size[0] * self.kernel_size[1] * self.in_channels
+            std = math.sqrt(2.0 / fan_in)
+            return np.random.randn(self.kernel_size[0], self.kernel_size[1], self.in_channels, self.out_channels) * std
         else:
             raise ValueError("Invalid initialization method")
 
@@ -36,9 +41,9 @@ class Conv2D:
         Initialize bias.
         returns:
             bias: initialized bias with shape: (1, 1, 1, out_channels)
-        
+
         """
-        return np.zeros((1, 1, 1, self.out_channels))
+        return np.random.randn(1, 1, 1, self.out_channels)
 
     def target_shape(self, input_shape):
         """
@@ -48,8 +53,8 @@ class Conv2D:
         returns:
             target_shape: shape of the output of the convolutional layer
         """
-        H = int(1 + (input_shape[0] + 2 * self.padding[0] - self.kernel_size[0]) / self.stride[0])
-        W = int(1 + (input_shape[1] + 2 * self.padding[1] - self.kernel_size[1]) / self.stride[1])
+        H = int((input_shape[0] + 2 * self.padding[0] - self.kernel_size[0]) / self.stride[0]) + 1
+        W = int((input_shape[1] + 2 * self.padding[1] - self.kernel_size[1]) / self.stride[1]) + 1
         return H, W
 
     def pad(self, A, padding, pad_value=0):
@@ -66,7 +71,7 @@ class Conv2D:
                           constant_values=(pad_value, pad_value))
         return A_padded
 
-    def single_step_convolve(self, a_slice_prev, W, b):
+    def single_step_convolve(self, a_slic_prev, W, b):
         """
         Convolve a slice of the input with the kernel.
         args:
@@ -76,8 +81,9 @@ class Conv2D:
         returns:
             Z: convolved value
         """
-        s = a_slice_prev * W
-        Z = np.sum(s) + np.float(b)
+        Z = a_slic_prev * W
+        Z = np.sum(Z)
+        Z = Z + b
         return Z
 
     def forward(self, A_prev):
@@ -94,16 +100,16 @@ class Conv2D:
         (kernel_size_h, kernel_size_w, C_prev, C) = W.shape
         stride_h, stride_w = self.stride[0], self.stride[1]
         padding_h, padding_w = self.padding[0], self.padding[1]
-        H, W = self.target_shape([H_prev, W_prev])
-        Z = np.zeros((batch_size, H, W, C))
-        A_prev_pad = self.pad(A_prev, self.padding, 0)
+        Height, Weight = self.target_shape([H_prev, W_prev])
+        Z = np.zeros((batch_size, Height, Weight, C))
+        A_prev_pad = self.pad(A_prev, self.padding)
         for i in range(batch_size):
-            for h in range(H):
+            for h in range(Height):
                 h_start = h * stride_h
-                h_end = h_start + self.kernel_size[0]
-                for w in range(W):
+                h_end = h_start + kernel_size_h
+                for w in range(Weight):
                     w_start = w * stride_w
-                    w_end = w_start + self.kernel_size[1]
+                    w_end = w_start + kernel_size_w
                     for c in range(C):
                         a_slice_prev = A_prev_pad[i, h_start:h_end, w_start:w_end, :]
                         Z[i, h, w, c] = self.single_step_convolve(a_slice_prev, W[:, :, :, c], b[:, :, :, c])
@@ -125,27 +131,29 @@ class Conv2D:
         (kernel_size_h, kernel_size_w, C_prev, C) = W.shape
         stride_h, stride_w = self.stride[0], self.stride[1]
         padding_h, padding_w = self.padding[0], self.padding[1]
-        H, W = self.target_shape([H_prev, W_prev])
-        dA_prev = np.zeros((batch_size, H_prev, W_prev, C_prev))
-        dW = np.zeros((kernel_size_h, kernel_size_w, C_prev, C))
-        db = np.zeros((1, 1, 1, C))
-        A_prev_pad = self.pad(A_prev, self.padding, 0)
-        dA_prev_pad = self.pad(dA_prev, self.padding, 0)
+        Height, Weight = self.target_shape([H_prev, W_prev])
+        dA_prev = np.zeros(A_prev.shape)
+        dW = np.zeros(self.parameters[0].shape)
+        db = np.zeros(self.parameters[1].shape)
+        A_prev_pad = self.pad(A_prev, self.padding)
+        dA_prev_pad = self.pad(dA_prev, self.padding)
         for i in range(batch_size):
             a_prev_pad = A_prev_pad[i]
             da_prev_pad = dA_prev_pad[i]
-            for h in range(H):
-                for w in range(W):
+            for h in range(Height):
+                for w in range(Weight):
                     for c in range(C):
                         h_start = h * stride_h
                         h_end = h_start + kernel_size_h
                         w_start = w * stride_w
                         w_end = w_start + kernel_size_w
                         a_slice = a_prev_pad[h_start:h_end, w_start:w_end, :]
-                        da_prev_pad[h_start:h_end, w_start:w_end, :] += W[:, :, :, c] * dZ[i, h, w, c]
-                        dW[..., c] += a_slice * dZ[i, h, w, c]
+                        da_prev_pad[h_start:h_end, w_start:w_end, :] += W[:, :, :, c] * dZ[
+                            i, h, w, c]
+                        dW[..., c] += a_slice * dZ[
+                            i, h, w, c]
                         db[..., c] += dZ[i, h, w, c]
-            dA_prev[i, :, :, :] = da_prev_pad[self.padding[0]:-self.padding[0], self.padding[1]:-self.padding[1], :]
+            dA_prev[i, :, :, :] = da_prev_pad[padding_h:-padding_h, padding_w:-padding_w, :]
         grads = [dW, db]
         return dA_prev, grads
 
